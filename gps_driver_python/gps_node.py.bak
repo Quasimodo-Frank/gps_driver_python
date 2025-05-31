@@ -1,0 +1,45 @@
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import NavSatFix, NavSatStatus
+import gps
+
+class GPSNode(Node):
+    def __init__(self):
+        super().__init__('gps_node')
+        self.publisher_ = self.create_publisher(NavSatFix, 'gps/fix', 10)
+
+        self.session = gps.gps(mode=gps.WATCH_ENABLE | gps.WATCH_NEWSTYLE)
+        self.timer = self.create_timer(1.0, self.timer_callback)
+#        self.gps_socket.connect('/var/run/gpsd.sock')
+
+    def timer_callback(self):
+        try:
+            report = self.session.next()
+            if report['class'] == 'TPV':
+                msg = NavSatFix()
+                msg.header.stamp = self.get_clock().now().to_msg()
+                msg.header.frame_id = "gps_link"
+
+                msg.status.status = NavSatStatus.STATUS_FIX if hasattr(report, 'mode') and report.mode >= 2 else NavSatStatus.STATUS_NO_FIX
+                msg.status.service = NavSatStatus.SERVICE_GPS
+
+                msg.latitude = getattr(report, 'lat', float('nan'))
+                msg.longitude = getattr(report, 'lon', float('nan'))
+                msg.altitude = getattr(report, 'alt', float('nan'))
+
+                msg.position_covariance_type = NavSatFix.COVARIANCE_TYPE_UNKNOWN
+
+                self.publisher_.publish(msg)
+        except StopIteration:
+            self.get_logger().warning("GPSD has terminated")
+        except Exception as e:
+            self.get_logger().error(f"GPS read error: {e}")
+
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = GPSNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
